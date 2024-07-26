@@ -9,13 +9,8 @@ pip install swig # Needs to be installed before requirements
 pip install -r requirements.txt
 ```
 
+```
 Compare KAN and MLPs
 Use it on Cartpole environment using DQN
 Implement a KAN based LSTM. Use it on cartpole environment using ADRQN
-
-
 ```
-
-## GIT
-
-git remote set-url origin https://TOKEN:x-oauth-basic@github.com/username/repo.git
