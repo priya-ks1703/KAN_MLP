@@ -2,6 +2,10 @@ import numpy as np
 import torch
 import torch.optim as optim
 from agent.replay_buffer import ReplayBuffer
+from agent.lstm import KanLSTM
+from fastkan import FastKAN as KAN
+import torch.nn.functional as F
+import torch.nn as nn
 
 
 def soft_update(target, source, tau):
@@ -125,3 +129,73 @@ class DQNAgent:
     def load(self, file_name):
         self.Q.load_state_dict(torch.load(file_name, map_location=self.device))
         self.Q_target.load_state_dict(torch.load(file_name, map_location=self.device))
+
+
+class ADRQNKAN(nn.Module):
+    def __init__(self, n_actions, state_size, embedding_size):
+        super(ADRQNKAN, self).__init__()
+        self.n_actions = n_actions
+        self.embedding_size = embedding_size
+        self.embedder = KAN([n_actions, embedding_size], num_grids=5)
+        # [state_size, 3, 32] for matching parameters
+        self.obs_layer = KAN([state_size, 3, 32], num_grids=5)
+        self.lstm = KanLSTM(input_size = 32+embedding_size, hidden_size = 128, num_outputs=128)
+        self.out_layer = KAN([128, n_actions], num_grids=5)
+    
+    def forward(self, observation, action, hidden = None):
+        #Takes observations with shape (batch_size, seq_len, obs_dim)
+        #Takes one_hot actions with shape (batch_size, seq_len, n_actions)
+        action_embedded = self.embedder(action)
+        observation = self.obs_layer(observation)
+        lstm_input = torch.cat([observation, action_embedded], dim = -1)
+        if hidden is not None:
+            lstm_out, hidden_out = self.lstm(lstm_input, hidden)
+        else:
+            lstm_out, hidden_out = self.lstm(lstm_input)
+
+        q_values = self.out_layer(lstm_out)
+        return q_values, hidden_out
+    
+    def act(self, observation, last_action, epsilon, hidden = None):
+        q_values, hidden_out = self.forward(observation, last_action, hidden)
+        if np.random.uniform() > epsilon:
+            action = torch.argmax(q_values).item()
+        else:
+            action = np.random.randint(self.n_actions)
+        return action, hidden_out
+    
+
+class ADRQN(nn.Module):
+    def __init__(self, n_actions, state_size, embedding_size):
+        super(ADRQN, self).__init__()
+        self.n_actions = n_actions
+        self.embedding_size = embedding_size
+        self.embedder = nn.Linear(n_actions, embedding_size)
+        self.obs_layer = nn.Linear(state_size, 16)
+        self.obs_layer2 = nn.Linear(16,32)
+        self.lstm = nn.LSTM(input_size = 32+embedding_size, hidden_size = 150, batch_first = True)
+        self.out_layer = nn.Linear(150, n_actions)
+    
+    def forward(self, observation, action, hidden = None):
+        #Takes observations with shape (batch_size, seq_len, obs_dim)
+        #Takes one_hot actions with shape (batch_size, seq_len, n_actions)
+        action_embedded = self.embedder(action)
+        observation = F.relu(self.obs_layer(observation))
+        observation = F.relu(self.obs_layer2(observation))
+        lstm_input = torch.cat([observation, action_embedded], dim = -1)
+        if hidden is not None:
+            lstm_out, hidden_out = self.lstm(lstm_input, hidden)
+        else:
+            lstm_out, hidden_out = self.lstm(lstm_input)
+
+        q_values = self.out_layer(lstm_out)
+        return q_values, hidden_out
+    
+    def act(self, observation, last_action, epsilon, hidden = None):
+        q_values, hidden_out = self.forward(observation, last_action, hidden)
+        if np.random.uniform() > epsilon:
+            action = torch.argmax(q_values).item()
+        else:
+            action = np.random.randint(self.n_actions)
+        return action, hidden_out
+

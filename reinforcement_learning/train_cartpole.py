@@ -58,7 +58,7 @@ def train_online(
     local_evaluation_interval=150,
     eval_cycle=20,
     num_eval_episodes=5,
-    model_dir="./models_cartpole",
+    model_dir="./models_cartpole_changingenv",
     model_config=None,
     in_distribution_range=0.2,
     out_distribution_range=0,
@@ -109,14 +109,14 @@ def train_online(
                 reward += stats.episode_reward
             avg_eval_reward = reward / num_eval_episodes
             tensorboard.write_episode_data(i, eval_dict={"avg_reward": avg_eval_reward})
-            if avg_eval_reward > best_eval_reward:
+            if avg_eval_reward >= best_eval_reward:
                 best_eval_reward = avg_eval_reward
                 agent.save(os.path.join(model_dir, f"best_model.pt"))
             if avg_eval_reward > best_eval_reward_local:
                 best_eval_reward_local = avg_eval_reward
                 agent.save(os.path.join(model_dir, local_model_name))
 
-    if avg_eval_reward > best_eval_reward:
+    if avg_eval_reward >= best_eval_reward:
         best_eval_reward = avg_eval_reward
         agent.save(os.path.join(model_dir, f"best_model.pt"))
 
@@ -138,12 +138,12 @@ if __name__ == "__main__":
     num_actions = 2
 
     model_configs = [
-                    ['mlp', [40], 'mlp_40', 0.0, 0],
-                    ['kan', [state_dim, 9, num_actions], 'kan_9', 0.0, 0],
-                    ['mlp', [40, 40], 'mlp_40_40', 0.0, 0], 
-                    ['kan', [state_dim, 16, 16, num_actions], 'kan_16_16', 0.0, 0],
-                    ['mlp', [40, 40, 40], 'mlp_40_40_40', 0.0, 0],
-                    ['kan', [state_dim, 17, 17, 17, num_actions], 'kan_17_17_17', 0.0, 0]
+                    # ['mlp', [40], 'mlp_40', 0.2, 0],
+                    # ['kan', [state_dim, 9, num_actions], 'kan_9', 0.2, 0],
+                    # ['mlp', [40, 40], 'mlp_40_40', 0.2, 0], 
+                    # ['kan', [state_dim, 16, 16, num_actions], 'kan_16_16', 0.2, 0],
+                    ['mlp', [40, 40, 40], 'mlp_40_40_40', 0.2, 0],
+                    # ['kan', [state_dim, 17, 17, 17, num_actions], 'kan_17_17_17', 0.2, 0]
                     ]
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

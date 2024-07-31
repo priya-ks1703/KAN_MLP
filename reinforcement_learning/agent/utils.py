@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import os
 from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter
+import torch
+import torch.nn.functional as F
 
 
 LEFT = 1
@@ -50,7 +52,7 @@ def sort_models(models):
     return sorted(models, key=model_sort_key)
 
 
-def plot_model_performance(data, dist_type, out_folder, model_types=None, name=""):
+def plot_checkpoint_performance(data, dist_type, out_folder, model_types=None, name=""):
     plt.figure(figsize=(10, 6))
     
     if model_types is None:
@@ -64,6 +66,9 @@ def plot_model_performance(data, dist_type, out_folder, model_types=None, name="
         # filter name_{idx}.pt -> idx for all model names
         model_names = [model.split('_')[-1].split('.')[0] for model in model_names]
         model_names[-1] = 'best'
+        temp = model_names[:-1]
+        temp = [str(int(model)+500) for model in temp]
+        model_names = temp + [model_names[-1]]
         plt.errorbar(model_names, means, yerr=stds, marker='.', label=model_type, capsize=2)
     
     plt.xlabel(f'Best Models for each {model_names[1]} epochs')
@@ -77,6 +82,39 @@ def plot_model_performance(data, dist_type, out_folder, model_types=None, name="
         name = f"_{name}"
 
     plt.savefig(f"{out_folder}/mean_episode_reward_{dist_type}{name}.png")
+
+
+def plot_model_performance(data, out_folder, checkpoint=None, model_types=None, name=""):
+    plt.figure(figsize=(10, 6))
+    
+    if checkpoint is None:
+        checkpoint = 'best_model.pt'
+
+    if model_types is None:
+        model_types = list(data.keys())
+
+    for model_type in model_types:
+        dist_types = data[model_type][checkpoint].keys()
+        dist_types = sorted([int(dist_type) for dist_type in dist_types])
+        dist_types_x = np.array(dist_types) / 10
+        dist_types = [str(dist_type) for dist_type in dist_types]
+
+        means = [data[model_type][checkpoint][dist_type]["mean"] for dist_type in dist_types]
+        stds = [data[model_type][checkpoint][dist_type]["std"] for dist_type in dist_types]
+
+        plt.plot(dist_types_x, means, label=model_type)
+        plt.fill_between(dist_types_x, np.array(means) - np.array(stds), np.array(means) + np.array(stds), alpha=0.2)
+    
+    plt.xlabel(f'Distribution Range')
+    plt.ylabel('Mean Reward')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+
+    if name != "":
+        name = f"_{name}"
+
+    plt.savefig(f"{out_folder}/model_performance{name}.png")
 
 
 def initialize_env_settings(env, percentage_range=0.2, out_of_distribution_percentage_range=0):
@@ -93,6 +131,9 @@ def initialize_env_settings(env, percentage_range=0.2, out_of_distribution_perce
 
     if out_of_distribution_percentage_range != 0:
         coin_toss = random.randint(0, 1)
+        if percentage_range + out_of_distribution_percentage_range > 1:
+            # only allow for a maximum of 100% change and change upwards when its more
+            coin_toss = 0
         if coin_toss == 1:
             uniform_range = (1-percentage_range-out_of_distribution_percentage_range, 1-percentage_range)
         else:
@@ -106,50 +147,6 @@ def initialize_env_settings(env, percentage_range=0.2, out_of_distribution_perce
     env.pole_mass_length = default_polemass_length * random.uniform(*uniform_range)
     env.force_mag = default_force_mag * random.uniform(*uniform_range)
     env.tau = default_tau * random.uniform(*uniform_range)
-
-
-def rgb2gray(rgb):
-    """
-    this method converts rgb images to grayscale.
-    """
-    gray = np.dot(rgb[..., :3], [0.2125, 0.7154, 0.0721])
-    return gray.astype("float32")
-
-
-def action_to_id(a):
-    """
-    this method discretizes the actions.
-    Important: this method only works if you recorded data pressing only one key at a time!
-    """
-    if all(a == [-1.0, 0.0, 0.0]):
-        return LEFT  # LEFT: 1
-    elif all(a == [1.0, 0.0, 0.0]):
-        return RIGHT  # RIGHT: 2
-    elif all(a == [0.0, 1.0, 0.0]):
-        return ACCELERATE  # ACCELERATE: 3
-    elif all(a == [0.0, 0.0, 0.2]):
-        return BRAKE  # BRAKE: 4
-    else:
-        return STRAIGHT  # STRAIGHT = 0
-
-
-def id_to_action(action_id, max_speed=0.8):
-    """
-    this method makes actions continous.
-    Important: this method only works if you recorded data pressing only one key at a time!
-    """
-    a = np.array([0.0, 0.0, 0.0])
-
-    if action_id == LEFT:
-        return np.array([-1.0, 0.0, 0.05])
-    elif action_id == RIGHT:
-        return np.array([1.0, 0.0, 0.05])
-    elif action_id == ACCELERATE:
-        return np.array([0.0, max_speed, 0.0])
-    elif action_id == BRAKE:
-        return np.array([0.0, 0.0, 0.1])
-    else:
-        return np.array([0.0, 0.0, 0.0])
 
 
 class EpisodeStats:
@@ -168,3 +165,44 @@ class EpisodeStats:
     def get_action_usage(self, action_id):
         ids = np.array(self.actions_ids)
         return len(ids[ids == action_id]) / len(ids)
+    
+
+def run_episode(env, 
+                agent, 
+                observation, 
+                last_action, 
+                epsilon, 
+                rendering=False, 
+                max_timesteps=200, 
+                in_distribution_range=0, 
+                out_distribution_range=0, 
+                device=None):
+    """
+    This methods runs one episode for a gym environment.
+    """
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    stats = EpisodeStats()
+    if out_distribution_range != 0 or in_distribution_range != 0:
+        initialize_env_settings(env, percentage_range=in_distribution_range, out_of_distribution_percentage_range=out_distribution_range)
+    observation = env.reset()
+
+    step = 0
+    while True:
+        action_id, hidden = agent.act(torch.tensor(observation).float().view(1,1,-1).to(device),F.one_hot(torch.tensor(last_action), env.action_space.n).view(1,1,-1).float().to(device), hidden = None, epsilon = epsilon)
+        next_state, reward, terminal, info = env.step(action_id)
+        stats.step(reward, action_id)
+
+        observation = next_state
+        last_action = action_id
+
+        if rendering:
+            env.render()
+
+        if terminal or step > max_timesteps:
+            break
+
+        step += 1
+
+    return stats

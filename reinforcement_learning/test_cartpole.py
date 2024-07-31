@@ -6,7 +6,7 @@ import torch
 from agent.dqn_agent import DQNAgent
 from train_cartpole import run_episode
 from agent.networks import *
-from agent.utils import plot_model_performance
+from agent.utils import plot_checkpoint_performance
 import numpy as np
 from fastkan import FastKAN as KAN
 import matplotlib.pyplot as plt
@@ -20,11 +20,13 @@ if __name__ == "__main__":
     state_dim = 4
     num_actions = 2
 
+    evaluation_type = 'model_performance'
+
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(device)
 
-    main_folder = "./models_cartpole"
-    n_test_episodes = 10
+    main_folder = "./models_cartpole_changingenv"
+    n_test_episodes = 30
 
     total_results = {}
 
@@ -50,7 +52,12 @@ if __name__ == "__main__":
 
         results = {}
 
-        for model in os.listdir(f"{main_folder}/{model_folder}"):
+        if evaluation_type == 'model_performance':
+            models = ['best_model.pt']
+        else:
+            models = os.listdir(f"{main_folder}/{model_folder}")
+
+        for model in models:
             if not model.endswith(".pt"):
                 continue
 
@@ -60,9 +67,26 @@ if __name__ == "__main__":
 
             results[model] = {}
 
-            for dist_type in [('in_distribution', model_config[-2], model_config[-1]), 
-                              # model_config[-1] contains out of distribution range (0 by default)
-                              ('out_of_distribution', model_config[-2], model_config[-1]+0.2)]:
+            config_in_distribution = model_config[-2]
+            config_out_distribution = model_config[-1]
+            eval_list = []
+            if evaluation_type == 'model_performance':
+                eval_list = [(0, config_in_distribution, config_out_distribution), 
+                              (1, config_in_distribution, config_out_distribution+0.1),
+                              (2, config_in_distribution, config_out_distribution+0.2),
+                              (3, config_in_distribution, config_out_distribution+0.3),
+                              (4, config_in_distribution, config_out_distribution+0.4),
+                              (5, config_in_distribution, config_out_distribution+0.5),
+                              (6, config_in_distribution, config_out_distribution+0.6),
+                              (7, config_in_distribution, config_out_distribution+0.7),
+                              (8, config_in_distribution, config_out_distribution+0.8),
+                              (9, config_in_distribution, config_out_distribution+0.9),
+                              (10, config_in_distribution, config_out_distribution+1)]
+            else:
+                eval_list = [(0, config_in_distribution, config_out_distribution), 
+                             (5, config_in_distribution, config_out_distribution+0.5),
+                             (10, config_in_distribution, config_out_distribution+1)]
+            for dist_type in eval_list:
                 episode_rewards = []
 
                 for i in range(n_test_episodes):
@@ -83,12 +107,12 @@ if __name__ == "__main__":
 
                 results[model][dist_type[0]] = model_results
 
-        with open(f"{main_folder}/{model_folder}/results.json", "w") as f:
+        with open(f"{main_folder}/{model_folder}/results_{evaluation_type}.json", "w") as f:
             json.dump(results, f, indent=4)
 
         total_results[model_folder] = results
 
-    with open(f"{main_folder}/total_results.json", "w") as f:
+    with open(f"{main_folder}/total_results_{evaluation_type}.json", "w") as f:
         json.dump(total_results, f, indent=4)
 
     env.close()

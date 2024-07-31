@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from fastkan import FastKAN as KAN
 
 class KanLSTMCell(nn.Module):
@@ -12,37 +11,17 @@ class KanLSTMCell(nn.Module):
         # Define MLPs for input and hidden state transformations
         self.KAN_x = KAN([input_size, kan_hidden_size, hidden_size], num_grids=5)
         self.KAN_h = KAN([hidden_size, kan_hidden_size, hidden_size], num_grids=5)
-        # self.KAN_x = KAN([input_size, hidden_size], num_grids=5)
-        # self.KAN_h = KAN([hidden_size, hidden_size], num_grids=5)
 
         # Biases for the gates
         self.b_i = nn.Parameter(torch.Tensor(hidden_size))
         self.b_f = nn.Parameter(torch.Tensor(hidden_size))
         self.b_o = nn.Parameter(torch.Tensor(hidden_size))
         self.b_c = nn.Parameter(torch.Tensor(hidden_size))
-    '''
-        self.reset_parameters()
 
-    def reset_parameters(self):
-        # Initialize biases
-        nn.init.zeros_(self.b_i)
-        nn.init.zeros_(self.b_f)
-        nn.init.zeros_(self.b_o)
-        nn.init.zeros_(self.b_c)
-    '''
-    
     def forward(self, x, hidden):
         h, c = hidden
 
         # Compute gate values
-        
-        '''
-        i = torch.sigmoid(self.KAN_x(x) + self.KAN_h(h) - 1 + self.b_i)
-        f = torch.sigmoid(self.KAN_x(x) + self.KAN_h(h) - 1 + self.b_f)
-        o = torch.sigmoid(self.KAN_x(x) + self.KAN_h(h) - 1 + self.b_o)
-        c_tilde = torch.tanh(self.KAN_x(x) + self.KAN_h(h) - 1 + self.b_c)
-        '''
-
         i = torch.sigmoid(self.KAN_x(x) + self.KAN_h(h))
         f = torch.sigmoid(self.KAN_x(x) + self.KAN_h(h))
         o = torch.sigmoid(self.KAN_x(x) + self.KAN_h(h))
@@ -63,7 +42,6 @@ class KanLSTM(nn.Module):
             [KanLSTMCell(input_size if i == 0 else hidden_size, hidden_size, kan_hidden_size) for i in range(num_layers)]
         )
         self.fc = KAN([hidden_size, num_outputs], num_grids=5)
-        # self.fc = nn.Linear(hidden_size, num_outputs)
     
     def forward(self, x, hidden=None):
         batch_size, seq_len, _ = x.size()
